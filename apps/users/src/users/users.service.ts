@@ -13,9 +13,9 @@ export class UsersService {
     private readonly notificationPreferenceModel: Model<NotificationPreference>,
   ) {}
 
-  async createUser(user: { id: number; name: string }) {
+  async createUser(data: { email: string; name: string }) {
     try {
-      const newUser = await this.userModel.create(user);
+      const newUser = await this.userModel.create(data);
       await this.notificationPreferenceModel.create({ userId: newUser._id });
       return newUser;
     } catch (error) {
@@ -37,8 +37,8 @@ export class UsersService {
     }
   }
 
-  async getUserById(id: number) {
-    return this.userModel.findOne({ id }).exec();
+  async getUserById(id: string) {
+    return this.userModel.findById(id).populate('notificationPreference').exec();
   }
 
   async getNotificationPreferenceByUserId(userId: string) {

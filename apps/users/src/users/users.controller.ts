@@ -6,12 +6,12 @@ import { UsersService } from './users.service.js';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
   @MessagePattern({ cmd: 'user.create' })
-  async createUser(@Payload() data: { id: number; name: string }) {
+  async createUser(@Payload() data: { email: string; name: string }) {
     return this.usersService.createUser(data);
   }
 
   @MessagePattern({ cmd: 'user.getById' })
-  async getUserById(@Payload() id: number) {
+  async getUserById(@Payload() id: string) {
     return this.usersService.getUserById(id);
   }
 
