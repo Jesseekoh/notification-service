@@ -27,18 +27,25 @@ export class UsersService {
       ) {
         throw new RpcException({
           message: 'User with this email already exists',
-          status: HttpStatus.CONFLICT,
+          statusCode: HttpStatus.CONFLICT,
         });
       }
       throw new RpcException({
         message: 'Internal server error',
-        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       });
     }
   }
 
   async getUserById(id: string) {
-    return this.userModel.findById(id).populate('notificationPreference').exec();
+    const user = await this.userModel.findById(id).exec();
+    if (!user) {
+      throw new RpcException({
+        message: `User with id ${id} not found`,
+        statusCode: HttpStatus.NOT_FOUND,
+      });
+    }
+    return user;
   }
 
   async getNotificationPreferenceByUserId(userId: string) {
