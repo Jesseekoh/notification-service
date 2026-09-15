@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { UsersRpcExceptionFilter } from './filters/users-rpc-exception.filter.js';
 import { Logger } from 'nestjs-pino';
 
 async function bootstrap() {
@@ -15,7 +14,6 @@ async function bootstrap() {
       },
     },
   );
-  app.useGlobalFilters(new UsersRpcExceptionFilter());
   app.useLogger(app.get(Logger));
   await app.listen();
 }

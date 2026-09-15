@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from './users/users.module.js';
 import { LoggerModule } from 'nestjs-pino';
+import { APP_FILTER } from '@nestjs/core';
+import { SharedRpcExceptionFilter } from '@notification/common';
 
 @Module({
   imports: [
@@ -23,6 +25,12 @@ import { LoggerModule } from 'nestjs-pino';
       }),
     }),
     UsersModule,
+  ],
+  providers: [
+    {
+      provide: APP_FILTER,
+      useClass: SharedRpcExceptionFilter,
+    },
   ],
 })
 export class AppModule {}
