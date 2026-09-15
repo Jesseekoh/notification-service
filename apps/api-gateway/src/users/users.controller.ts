@@ -8,11 +8,9 @@ import {
   Post,
   UseFilters,
 } from '@nestjs/common';
-import { RpcToHttpExceptionFilter } from '../rpc-exception.filter.js';
 import { UsersService } from './users.service.js';
 
 @Controller('users')
-@UseFilters(RpcToHttpExceptionFilter)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

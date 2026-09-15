@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices/client/index.js';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class UsersService {
@@ -12,7 +13,7 @@ export class UsersService {
   }
 
   async getUserById(id: string) {
-    return this.usersService.send({ cmd: 'user.getById' }, id);
+    return firstValueFrom(this.usersService.send({ cmd: 'user.getById' }, id));
   }
 
   async getNotificationPreferenceByUserId(userId: string) {
