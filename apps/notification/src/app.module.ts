@@ -6,9 +6,11 @@ import { SharedRpcExceptionFilter } from '@notification/common';
 import { BullModule } from '@nestjs/bullmq';
 import { EmailModule } from './email/email.module.js';
 import { NotificationModule } from './notification/notification.module.js';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
     BullModule.forRoot({
       connection: {
         host: 'localhost',
