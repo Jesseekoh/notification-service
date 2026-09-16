@@ -31,6 +31,14 @@ export class TemplatesController {
     );
   }
 
+  @MessagePattern({ cmd: 'template.render' })
+  async renderTemplate(
+    @Payload() data: { templateId: string; variables: any },
+  ) {
+    const { templateId, variables } = data;
+    return this.templatesService.renderTemplate(templateId, variables);
+  }
+
   @MessagePattern({ cmd: 'template.delete' })
   remove(@Payload() id: string) {
     return this.templatesService.remove(id);

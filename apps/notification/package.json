@@ -11,6 +11,7 @@
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
+    "dev": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
@@ -27,7 +28,9 @@
     "@nestjs/core": "^12.0.1",
     "@nestjs/microservices": "^12.0.3",
     "@nestjs/platform-express": "^12.0.1",
+    "@notification/common": "workspace:*",
     "bullmq": "^6.3.6",
+    "ioredis": "^6.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

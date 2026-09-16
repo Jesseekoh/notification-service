@@ -18,12 +18,22 @@ export class SharedRpcExceptionFilter implements RpcExceptionFilter {
       return throwError(() => exception.getError());
     }
 
+    if (
+      exception &&
+      typeof exception === 'object' &&
+      'statusCode' in exception &&
+      'message' in exception
+    ) {
+      this.logger.error(JSON.stringify(exception));
+      return throwError(() => exception);
+    }
+
     if (exception instanceof Error) {
       this.logger.error(exception.stack ?? exception.message);
 
       return throwError(() => ({
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: 'Internal server error',
+        message: exception.message,
       }));
     }
 
@@ -31,7 +41,7 @@ export class SharedRpcExceptionFilter implements RpcExceptionFilter {
 
     return throwError(() => ({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Internal server error',
+      message: 'Internal server error skdlfsldjfslkjd',
     }));
   }
 }
