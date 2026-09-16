@@ -42,12 +42,12 @@ export class NotificationService {
       ? await this.resolveTemplateBody(templateId, variables)
       : body;
 
-    this.emailService.addToQueue({
+    const jobId = await this.emailService.addToQueue({
       to: user.email,
       subject: dto.subject ?? 'Notification',
       body: emailBody,
     });
-    return { user, notificationPreference };
+    return { message: 'queued', jobId };
   }
 
   async resolveTemplateBody(

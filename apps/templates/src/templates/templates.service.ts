@@ -61,7 +61,7 @@ export class TemplatesService {
       const body = compiledBody(variables);
 
       console.log(variables);
-      return { body };
+      return body;
     } catch (err) {
       this.logger.error(
         `Failed to render template ${templateId}`,
