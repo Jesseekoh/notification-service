@@ -1,0 +1,30 @@
+{
+  "name": "@notification/common",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "oxlint src/",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.0.1",
+    "@nestjs/microservices": "^12.0.1",
+    "rxjs": "^7.8.1",
+    "@types/express": "^5.0.0",
+    "@types/node": "^26.5.1"
+  },
+  "devDependencies": {
+    "oxlint": "^1.58.0",
+    "typescript": "^6.0.2"
+  }
+}
