@@ -6,9 +6,9 @@ import {
   type RpcExceptionFilter,
   type ExceptionFilter,
   HttpException,
-} from '@nestjs/common';
-import { RpcException } from '@nestjs/microservices';
-import { Observable, throwError } from 'rxjs';
+} from "@nestjs/common";
+import { RpcException } from "@nestjs/microservices";
+import { Observable, throwError } from "rxjs";
 @Catch()
 export class SharedRpcExceptionFilter implements RpcExceptionFilter {
   private readonly logger = new Logger(SharedRpcExceptionFilter.name);
@@ -20,9 +20,9 @@ export class SharedRpcExceptionFilter implements RpcExceptionFilter {
 
     if (
       exception &&
-      typeof exception === 'object' &&
-      'statusCode' in exception &&
-      'message' in exception
+      typeof exception === "object" &&
+      "statusCode" in exception &&
+      "message" in exception
     ) {
       this.logger.error(JSON.stringify(exception));
       return throwError(() => exception);
@@ -41,7 +41,7 @@ export class SharedRpcExceptionFilter implements RpcExceptionFilter {
 
     return throwError(() => ({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Internal server error skdlfsldjfslkjd',
+      message: "Internal server error",
     }));
   }
 }
@@ -62,16 +62,18 @@ export class SharedRpcToHttpExceptionFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const res = exception.getResponse();
       const message =
-        typeof res === 'object' && res !== null && 'message' in res
+        typeof res === "object" && res !== null && "message" in res
           ? (res as any).message
           : res;
+
       response.status(status).json({ statusCode: status, message });
       return;
     }
     const error = this.getErrorPayload(exception);
     const status =
       error.statusCode ?? error.status ?? HttpStatus.INTERNAL_SERVER_ERROR;
-    const message = error.message ?? 'Internal server error';
+    const message = error.message || "Internal server error";
+    this.logger.log(error);
     response.status(status).json({ statusCode: status, message });
   }
 
@@ -80,13 +82,13 @@ export class SharedRpcToHttpExceptionFilter implements ExceptionFilter {
     status?: number;
     message?: string;
   } {
-    if (typeof exception !== 'object' || exception === null) {
+    if (typeof exception !== "object" || exception === null) {
       return {};
     }
 
-    const payload = 'error' in exception ? exception.error : exception;
-    if (typeof payload !== 'object' || payload === null) {
-      return typeof payload === 'string' ? { message: payload } : {};
+    const payload = "error" in exception ? exception.error : exception;
+    if (typeof payload !== "object" || payload === null) {
+      return typeof payload === "string" ? { message: payload } : {};
     }
 
     return payload as {

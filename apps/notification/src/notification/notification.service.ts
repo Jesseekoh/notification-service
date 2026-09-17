@@ -2,12 +2,14 @@ import { Injectable, Inject, HttpStatus } from '@nestjs/common';
 import { EmailService } from '../email/email.service.js';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
+import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 
 @Injectable()
 export class NotificationService {
   constructor(
     @Inject('USERS_SERVICE') private readonly usersService: ClientProxy,
     @Inject('TEMPLATES_SERVICE') private readonly templateService: ClientProxy,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
     private readonly emailService: EmailService,
   ) {}
 
@@ -19,20 +21,34 @@ export class NotificationService {
     subject?: string;
   }) {
     const { userId, templateId, body, variables } = dto;
-
-    const user = await firstValueFrom(
-      this.usersService.send({ cmd: 'user.getById' }, userId),
-    );
-
     if (!templateId && !body) {
       throw new RpcException({
         statusCode: HttpStatus.BAD_REQUEST,
         message: 'Either templateId or body must be provided',
       });
     }
-    const notificationPreference = await firstValueFrom(
-      this.usersService.send({ cmd: 'user.getNotificationPreference' }, userId),
-    );
+
+    const [user, notificationPreference] = await Promise.all([
+      this.getOrFetch(
+        `user-${userId}`,
+        () =>
+          firstValueFrom(
+            this.usersService.send({ cmd: 'user.getById' }, userId),
+          ),
+        15 * 60 * 1000,
+      ),
+      this.getOrFetch(
+        `notification-pref-${userId}`,
+        () =>
+          firstValueFrom(
+            this.usersService.send(
+              { cmd: 'user.getNotificationPreference' },
+              userId,
+            ),
+          ),
+        2 * 60 * 1000,
+      ),
+    ]);
 
     if (!notificationPreference?.emailNotifications) {
       return;
@@ -61,5 +77,19 @@ export class NotificationService {
       ),
     );
     return rendered;
+  }
+
+  private async getOrFetch<T>(
+    key: string,
+    fetcher: () => Promise<T>,
+    ttl?: number,
+  ) {
+    const cached = await this.cacheManager.get<T>(key);
+    if (cached) {
+      return cached;
+    }
+
+    const data = await fetcher();
+    await this.cacheManager.set(key, data, ttl);
   }
 }

@@ -7,10 +7,11 @@ import { BullModule } from '@nestjs/bullmq';
 import { EmailModule } from './email/email.module.js';
 import { NotificationModule } from './notification/notification.module.js';
 import { ConfigModule } from '@nestjs/config';
-
+import { CacheModule } from '@nestjs/cache-manager';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CacheModule.register({ isGlobal: true, ttl: 5 * 60 * 1000 }),
     BullModule.forRoot({
       connection: {
         host: 'localhost',
