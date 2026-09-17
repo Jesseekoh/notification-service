@@ -1,159 +1,428 @@
-# Turborepo starter
+# Distributed Notification Service
 
-This Turborepo starter is maintained by the Turborepo core team.
+A scalable, distributed notification and template rendering platform built as a TypeScript monorepo using **NestJS**, **Turborepo**, and **Bun**. The system manages users, custom notification preferences, dynamic email templates (compiled via Handlebars), and reliable background email dispatching powered by **BullMQ**, **Redis**, and **Resend**.
 
-## Using this example
+---
 
-Run the following command:
+## Architecture Overview
 
-```sh
-npx create-turbo@latest
+The system is decoupled into an HTTP API Gateway and three dedicated microservices communicating internally via TCP RPC:
+
+```mermaid
+flowchart TD
+    Client(["Client (HTTP/REST)"])
+
+    subgraph Gateway ["API Gateway (Port 3000)"]
+        APIGW["NestJS REST Gateway"]
+    end
+
+    subgraph Internal ["Internal TCP Microservices"]
+        UsersSvc["Users Service\n(TCP :3001)"]
+        TemplatesSvc["Templates Service\n(TCP :3002)"]
+        NotifSvc["Notification Service\n(TCP :3003)"]
+    end
+
+    subgraph Storage ["Datastores & Queues"]
+        MongoUsers[("MongoDB\n(Users & Preferences)")]
+        MongoTemplates[("MongoDB\n(Templates)")]
+        RedisQueue[("Redis :6379\n(BullMQ Email Queue & Cache)")]
+    end
+
+    subgraph Delivery ["External Providers"]
+        ResendAPI["Resend Email API"]
+    end
+
+    Client -->|HTTP Requests| APIGW
+    APIGW -->|TCP: user.*| UsersSvc
+    APIGW -->|TCP: template.*| TemplatesSvc
+    APIGW -->|TCP: notification.*| NotifSvc
+
+    UsersSvc --> MongoUsers
+    TemplatesSvc --> MongoTemplates
+
+    NotifSvc -->|Check Prefs & Email| UsersSvc
+    NotifSvc -->|Render Template| TemplatesSvc
+    NotifSvc -->|Enqueue Job| RedisQueue
+    RedisQueue -->|Worker Consumer| NotifSvc
+    NotifSvc -->|Send Transactional Email| ResendAPI
 ```
 
-## What's inside?
+### Flow for Email Notification Dispatch:
 
-This Turborepo includes the following packages/apps:
+1. Client issues `POST /notifications/send-email` to the **API Gateway**.
+2. Gateway routes the request to **Notification Service** over TCP (`cmd: 'notification.sendEmail'`).
+3. **Notification Service** checks recipient user record & notification preferences from **Users Service** (cached with in-memory TTL).
+4. If `emailNotifications` is disabled, the request completes gracefully without sending.
+5. If a `templateId` is specified, **Notification Service** invokes **Templates Service** (`cmd: 'template.render'`) to compile the Handlebars template with variables.
+6. The compiled email is enqueued in the **BullMQ** `email` queue in Redis (with 4 retries and exponential backoff).
+7. The background `EmailConsumer` worker processes the queue job and triggers the **Resend API**.
 
-### Apps and Packages
+---
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `@next/eslint-plugin-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+## Monorepo Layout
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```
+├── apps/
+│   ├── api-gateway/       # Public HTTP REST API, validation pipes, multipart upload
+│   ├── notification/      # Notification orchestration, BullMQ email queue, Resend integration
+│   ├── templates/         # Handlebars template management, storage, and rendering
+│   └── users/             # User accounts and notification preference management
+├── packages/
+│   └── common/            # Shared exception filters, RPC-to-HTTP mapping, shared types
+├── docker-compose.yml     # Local MongoDB & Redis infrastructure
+├── package.json           # Monorepo root scripts (Bun workspace)
+└── turbo.json             # Turborepo task pipeline configuration
 ```
 
-Without global `turbo`, use your package manager:
+---
 
-```sh
-cd my-turborepo
-npx turbo build
-bun exec turbo build
-bun exec turbo build
+## Tech Stack
+
+| Component             | Technology                                                                | Description                                                       |
+| :-------------------- | :------------------------------------------------------------------------ | :---------------------------------------------------------------- |
+| **Monorepo Engine**   | [Turborepo](https://turbo.build/) & [Bun](https://bun.sh/)                | Workspaces, fast dependency installation & build orchestration    |
+| **Backend Framework** | [NestJS 12](https://nestjs.com/)                                          | Modular Node.js microservices framework                           |
+| **Inter-Service IPC** | NestJS TCP Microservice                                                   | High-performance direct TCP message patterns                      |
+| **Datastores**        | [MongoDB](https://www.mongodb.com/) & [Mongoose](https://mongoosejs.com/) | Persistent document storage for Users, Preferences, and Templates |
+| **Queue / Cache**     | [Redis](https://redis.io/) & [BullMQ](https://docs.bullmq.io/)            | Job queues with exponential backoff and result caching            |
+| **Template Engine**   | [Handlebars](https://handlebarsjs.com/)                                   | Fast semantic template compilation                                |
+| **Email Delivery**    | [Resend](https://resend.com/)                                             | Developer-first transactional email delivery                      |
+| **Logging**           | [Pino](https://getpino.io/) (`nestjs-pino`)                               | High-performance structured JSON and pretty logging               |
+| **Code Quality**      | [Oxlint](https://oxc.rs/), Prettier, Vitest                               | Fast linting, code formatting, and testing                        |
+
+---
+
+## Environment Setup & Configuration
+
+Each service reads configuration from environment variables. Example configuration files (`.env.example`) are provided in the repository.
+
+### 1. Environment Variables by Application
+
+#### `apps/api-gateway`
+
+Create `apps/api-gateway/.env`:
+
+| Variable   | Required |    Default    | Description                                            |
+| :--------- | :------: | :-----------: | :----------------------------------------------------- |
+| `PORT`     |    No    |    `3000`     | HTTP port on which the API Gateway listens             |
+| `NODE_ENV` |    No    | `development` | Environment mode (`development`, `production`, `test`) |
+
+#### `apps/users`
+
+Create `apps/users/.env`:
+
+| Variable      | Required |                    Default                     | Description                                                                    |
+| :------------ | :------: | :--------------------------------------------: | :----------------------------------------------------------------------------- |
+| `MONGODB_URI` | **Yes**  | `mongodb://localhost:27017/notification_users` | MongoDB connection string for users database                                   |
+| `NODE_ENV`    |    No    |                 `development`                  | Set to `development` for pretty console logs; `production` for structured JSON |
+
+#### `apps/templates`
+
+Create `apps/templates/.env`:
+
+| Variable      | Required |                      Default                       | Description                                      |
+| :------------ | :------: | :------------------------------------------------: | :----------------------------------------------- |
+| `MONGODB_URI` | **Yes**  | `mongodb://localhost:27017/notification_templates` | MongoDB connection string for templates database |
+| `NODE_ENV`    |    No    |                   `development`                    | Environment mode (`development`, `production`)   |
+
+#### `apps/notification`
+
+Create `apps/notification/.env`:
+
+| Variable         | Required |    Default    | Description                                                                       |
+| :--------------- | :------: | :-----------: | :-------------------------------------------------------------------------------- |
+| `RESEND_API_KEY` | **Yes**  |       -       | Resend API key for sending emails ([Resend Console](https://resend.com/api-keys)) |
+| `REDIS_HOST`     |    No    |  `localhost`  | Host of the Redis server for BullMQ queue                                         |
+| `REDIS_PORT`     |    No    |    `6379`     | Port of the Redis server                                                          |
+| `NODE_ENV`       |    No    | `development` | Environment mode (`development`, `production`)                                    |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) (v1.4.0 or later)
+- [Node.js](https://nodejs.org/) (v24 or later)
+- [Docker & Docker Compose](https://www.docker.com/) (for MongoDB & Redis)
+- A [Resend](https://resend.com/) account and API key
+
+### 1. Clone & Install Dependencies
+
+```bash
+git clone <repository-url>
+cd notification-service
+bun install
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### 2. Start Supporting Infrastructure (MongoDB & Redis)
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+A ready-to-use Docker Compose configuration is provided at the repository root:
 
-```sh
-turbo build --filter=docs
+```bash
+docker compose up -d
 ```
 
-Without global `turbo`:
+This starts:
 
-```sh
-npx turbo build --filter=docs
-bun exec turbo build --filter=docs
-bun exec turbo build --filter=docs
+- **MongoDB** on `localhost:27017`
+- **Redis** on `localhost:6379`
+
+### 3. Configure Environment Variables
+
+Copy the example configuration for each application:
+
+```bash
+# Gateway
+cp apps/api-gateway/.env.example apps/api-gateway/.env
+
+# Users Service
+cp apps/users/.env.example apps/users/.env
+
+# Templates Service
+cp apps/templates/.env.example apps/templates/.env
+
+# Notification Service
+cp apps/notification/.env.example apps/notification/.env
 ```
 
-### Develop
+> [!IMPORTANT]
+> Ensure you populate `RESEND_API_KEY` inside `apps/notification/.env` with your actual Resend API key.
 
-To develop all apps and packages, run the following command:
+### 4. Run the Applications
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+Start all services concurrently with hot-reloading via Turborepo:
 
-```sh
-cd my-turborepo
-turbo dev
+```bash
+bun run dev
 ```
 
-Without global `turbo`, use your package manager:
+To run an individual service only:
 
-```sh
-cd my-turborepo
-npx turbo dev
-bun exec turbo dev
-bun exec turbo dev
+```bash
+# Run API Gateway only
+bun x turbo dev --filter=api-gateway
+
+# Run Users microservice only
+bun x turbo dev --filter=users
+
+# Run Templates microservice only
+bun x turbo dev --filter=templates
+
+# Run Notification microservice only
+bun x turbo dev --filter=notification
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+---
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+## Build & Scripts
 
-```sh
-turbo dev --filter=web
+| Command               | Action                                              |
+| :-------------------- | :-------------------------------------------------- |
+| `bun run dev`         | Start all microservices in watch/development mode   |
+| `bun run build`       | Compile all TypeScript packages and NestJS services |
+| `bun run lint`        | Run `oxlint` across all services                    |
+| `bun run format`      | Format the entire codebase with Prettier            |
+| `bun run check-types` | Typecheck all packages without emitting output      |
+| `bun run test`        | Run unit tests with Vitest across all services      |
+
+---
+
+## HTTP REST API Reference (API Gateway)
+
+Base URL: `http://localhost:3000`
+
+### 1. Users
+
+#### Create User
+
+- **Method / Path:** `POST /users`
+- **Headers:** `Content-Type: application/json`
+- **Body:**
+  ```json
+  {
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  }
+  ```
+- **Response (`201 Created`):**
+  ```json
+  {
+    "_id": "65fc1234567890abcdef1234",
+    "name": "Jane Doe",
+    "email": "jane@example.com",
+    "__v": 0
+  }
+  ```
+
+> [!NOTE]
+> Creating a user automatically provisions a default `NotificationPreference` record with `emailNotifications: true` and `pushNotifications: true`.
+
+#### Get User by ID
+
+- **Method / Path:** `GET /users/:id`
+- **Response (`200 OK`):**
+  ```json
+  {
+    "_id": "65fc1234567890abcdef1234",
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  }
+  ```
+
+#### Get User Notification Preferences
+
+- **Method / Path:** `GET /users/notification-preference/:userId`
+- **Response (`200 OK`):**
+  ```json
+  {
+    "_id": "65fc9876543210fedcba4321",
+    "userId": "65fc1234567890abcdef1234",
+    "emailNotifications": true,
+    "pushNotifications": true
+  }
+  ```
+
+#### Update User Notification Preferences
+
+- **Method / Path:** `PATCH /users/notification-preference/:userId`
+- **Headers:** `Content-Type: application/json`
+- **Body:**
+  ```json
+  {
+    "emailNotifications": false
+  }
+  ```
+- **Response (`200 OK`):** Updated preference object.
+
+---
+
+### 2. Templates
+
+Templates support Handlebars syntax (e.g. `{{name}}`, `{{actionUrl}}`). Templates are uploaded as files (`multipart/form-data`).
+
+#### Create Template
+
+- **Method / Path:** `POST /templates`
+- **Content-Type:** `multipart/form-data`
+- **Form Fields:**
+  - `file`: The template file (e.g., `.html` or text template)
+  - `name`: Unique name of the template (string)
+  - `variables`: JSON array or string describing template variables (e.g. `[{"name": "userName", "required": true}]`)
+
+**cURL Example:**
+
+```bash
+curl -X POST http://localhost:3000/templates \
+  -F "name=welcome-email" \
+  -F "variables=[{\"name\":\"name\",\"required\":true}]" \
+  -F "file=@welcome.html"
 ```
 
-Without global `turbo`:
+#### List All Templates
 
-```sh
-npx turbo dev --filter=web
-bun exec turbo dev --filter=web
-bun exec turbo dev --filter=web
+- **Method / Path:** `GET /templates`
+- **Response (`200 OK`):** Array of template documents.
+
+#### Get Template by ID
+
+- **Method / Path:** `GET /templates/:id`
+- **Response (`200 OK`):** Template document including content and variables schema.
+
+#### Update Template
+
+- **Method / Path:** `PATCH /templates/:id`
+- **Content-Type:** `multipart/form-data`
+
+#### Delete Template
+
+- **Method / Path:** `DELETE /templates/:id`
+
+---
+
+### 3. Notifications
+
+#### Send Email Notification
+
+- **Method / Path:** `POST /notifications/send-email`
+- **Headers:** `Content-Type: application/json`
+- **Body Options:**
+
+_Option A: Using a pre-defined Handlebars template:_
+
+```json
+{
+  "userId": "65fc1234567890abcdef1234",
+  "templateId": "65fc2345678901abcdef5678",
+  "subject": "Welcome to Our Platform!",
+  "variables": {
+    "name": "Jane"
+  }
+}
 ```
 
-### Remote Caching
+_Option B: Using a raw HTML/text body:_
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
+```json
+{
+  "userId": "65fc1234567890abcdef1234",
+  "subject": "Account Alert",
+  "body": "<h1>Security Notice</h1><p>Your password was changed.</p>"
+}
 ```
 
-Without global `turbo`, use your package manager:
+- **Response (`202 Accepted`):**
 
-```sh
-cd my-turborepo
-npx turbo login
-bun exec turbo login
-bun exec turbo login
+```json
+{
+  "message": "queued",
+  "jobId": "1"
+}
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+---
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
+## Microservices Internal RPC Reference
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+All microservices communicate through NestJS TCP transport using `{ cmd: '<pattern>' }`.
 
-```sh
-turbo link
-```
+### Users Service (`localhost:3001`)
 
-Without global `turbo`:
+| Pattern                                        | Payload                                   | Description                                     |
+| :--------------------------------------------- | :---------------------------------------- | :---------------------------------------------- |
+| `{ cmd: 'user.create' }`                       | `{ email: string, name: string }`         | Creates user & default notification preferences |
+| `{ cmd: 'user.getById' }`                      | `userId: string`                          | Retrieves user document by ID                   |
+| `{ cmd: 'user.getNotificationPreference' }`    | `userId: string`                          | Retrieves notification preferences for a user   |
+| `{ cmd: 'user.updateNotificationPreference' }` | `{ userId: string, preferences: object }` | Updates notification preferences                |
 
-```sh
-npx turbo link
-bun exec turbo link
-bun exec turbo link
-```
+### Templates Service (`localhost:3002`)
 
-## Useful Links
+| Pattern                       | Payload                                     | Description                              |
+| :---------------------------- | :------------------------------------------ | :--------------------------------------- |
+| `{ cmd: 'template.create' }`  | `{ name, content, variables }`              | Saves a new email template               |
+| `{ cmd: 'template.findAll' }` | `{}`                                        | Lists all saved templates                |
+| `{ cmd: 'template.findOne' }` | `id: string`                                | Fetches template by ID                   |
+| `{ cmd: 'template.update' }`  | `{ id, ...data }`                           | Updates template content or metadata     |
+| `{ cmd: 'template.delete' }`  | `id: string`                                | Deletes a template                       |
+| `{ cmd: 'template.render' }`  | `{ templateId: string, variables: object }` | Compiles and renders Handlebars template |
 
-Learn more about the power of Turborepo:
+### Notification Service (`localhost:3003`)
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+| Pattern                             | Payload                                                | Description                                |
+| :---------------------------------- | :----------------------------------------------------- | :----------------------------------------- |
+| `{ cmd: 'notification.sendEmail' }` | `{ userId, templateId?, body?, subject?, variables? }` | Validates, renders, and enqueues email job |
+
+---
+
+## Error Handling & Exception Filters
+
+A shared exception handling layer in `@notification/common` ensures uniform error serialization between TCP microservices and the REST API Gateway:
+
+- **`SharedRpcExceptionFilter`**: Catches errors inside microservices, normalizes MongoDB duplicate key errors (code 11000) into HTTP 409 Conflict, and wraps exceptions into clean RPC error payloads.
+- **`SharedRpcToHttpExceptionFilter`**: Installed globally on the API Gateway to catch TCP RPC errors and map them to standard HTTP status codes (`400`, `404`, `409`, `500`) with consistent JSON error bodies.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
